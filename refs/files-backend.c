@@ -20,7 +20,6 @@
 #include "../dir-iterator.h"
 #include "../lockfile.h"
 #include "../object.h"
-#include "../object-file.h"
 #include "../path.h"
 #include "../dir.h"
 #include "../chdir-notify.h"
@@ -3211,11 +3210,13 @@ static int files_transaction_finish_initial(struct files_ref_store *refs,
 		string_list_append(&refnames_to_check, update->refname);
 
 		/*
-		 * packed-refs don't support symbolic refs, root refs and reflogs,
-		 * so we have to queue these references via the loose transaction.
+		 * packed-refs don't support symbolic refs, root refs, per-worktree
+		 * refs, and reflogs, so we have to queue these references via the
+		 * loose transaction.
 		 */
 		if (update->new_target ||
 		    is_root_ref(update->refname) ||
+		    is_per_worktree_ref(update->refname) ||
 		    (update->flags & REF_LOG_ONLY)) {
 			if (!loose_transaction) {
 				loose_transaction = ref_store_transaction_begin(&refs->base, 0, err);
@@ -3328,7 +3329,13 @@ static int files_transaction_finish(struct ref_store *ref_store,
 		 * next update. If not, we try and create a regular symref.
 		 */
 		if (update->new_target && refs->prefer_symlink_refs)
-			if (!create_ref_symlink(lock, update->new_target))
+			/*
+			 * By using the `NOT_CONSTANT()` trick, we can avoid
+			 * errors by `clang`'s `-Wunreachable` logic that would
+			 * report that the `continue` statement is not reachable
+			 * when `NO_SYMLINK_HEAD` is `#define`d.
+			 */
+			if (NOT_CONSTANT(!create_ref_symlink(lock, update->new_target)))
 				continue;
 
 		if (update->flags & REF_NEEDS_COMMIT) {
@@ -3970,8 +3977,6 @@ static int files_fsck_refs(struct ref_store *ref_store,
 		NULL,
 	};
 
-	if (o->verbose)
-		fprintf_ln(stderr, _("Checking references consistency"));
 	return files_fsck_refs_dir(ref_store, o, "refs", wt, fsck_refs_fn);
 }
 
