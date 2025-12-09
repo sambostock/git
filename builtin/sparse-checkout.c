@@ -114,7 +114,7 @@ static int sparse_checkout_list(int argc, const char **argv, const char *prefix,
 
 static void clean_tracked_sparse_directories(struct repository *r)
 {
-	int i, was_full = 0;
+	int i;
 	struct strbuf path = STRBUF_INIT;
 	size_t pathlen;
 	struct string_list_item *item;
@@ -144,7 +144,6 @@ static void clean_tracked_sparse_directories(struct repository *r)
 		 */
 		if (convert_to_sparse(r->index, SPARSE_INDEX_MEMORY_ONLY))
 			return;
-		was_full = 1;
 	}
 
 	strbuf_addstr(&path, r->worktree);
@@ -201,9 +200,6 @@ static void clean_tracked_sparse_directories(struct repository *r)
 
 	string_list_clear(&sparse_dirs, 0);
 	strbuf_release(&path);
-
-	if (was_full)
-		ensure_full_index(r->index);
 }
 
 static int update_working_directory(struct repository *r,
