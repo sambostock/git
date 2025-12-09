@@ -241,9 +241,15 @@ int convert_to_sparse(struct index_state *istate, int flags)
 						 0, 0, istate->cache_nr,
 						 "", 0, istate->cache_tree);
 
-	/* Clear and recompute the cache-tree */
+	/*
+	 * Clear the now-invalid cache-tree. For on-disk conversions, rebuild
+	 * it to match the new sparse index structure. For memory-only
+	 * conversions (SPARSE_INDEX_MEMORY_ONLY), leave it NULL since no
+	 * subsequent operation needs it and rebuilding is expensive.
+	 */
 	cache_tree_free(&istate->cache_tree);
-	cache_tree_update(istate, 0);
+	if (!(flags & SPARSE_INDEX_MEMORY_ONLY))
+		cache_tree_update(istate, 0);
 
 	istate->fsmonitor_has_run_once = 0;
 	ewah_free(istate->fsmonitor_dirty);
