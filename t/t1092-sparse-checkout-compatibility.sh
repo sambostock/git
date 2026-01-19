@@ -2567,4 +2567,14 @@ test_expect_success 'cat-file --batch' '
 	ensure_expanded cat-file --batch <in
 '
 
+test_expect_success 'merge-index does not expand sparse index' '
+	init_repos &&
+
+	# With no unmerged entries, merge-index -a should do nothing
+	# and not expand the sparse index. The command sets
+	# command_requires_full_index = 0, so the index stays sparse.
+	run_sparse_index_trace2 merge-index echo -a &&
+	test_region ! index ensure_full_index trace2.txt
+'
+
 test_done
