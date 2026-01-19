@@ -2597,4 +2597,28 @@ test_expect_success 'sparse-index is not expanded: maintenance run' '
 	ensure_not_expanded maintenance run --task=commit-graph
 '
 
+test_expect_success 'sparse-index is not expanded: merge-index with file' '
+	init_repos &&
+
+	# Create a merge conflict in a file within the sparse cone
+	for side in right left
+	do
+		git -C sparse-index checkout -b merge-index-$side base &&
+		echo $side >sparse-index/deep/a &&
+		git -C sparse-index commit -a -m "$side" || return 1
+	done &&
+
+	# Create 3-way merge state with conflict in the index
+	git -C sparse-index checkout merge-index-left &&
+	git -C sparse-index read-tree -m \
+		base merge-index-left merge-index-right &&
+
+	# merge-index with explicit file path should not expand the index
+	# Note: merge-index -a (all files) intentionally expands as it must
+	# iterate all conflicting entries
+	# The ! prefix indicates merge-index exits non-zero due to conflict
+	WITHOUT_UNTRACKED_TXT=1 \
+		ensure_not_expanded ! merge-index git-merge-one-file deep/a
+'
+
 test_done
