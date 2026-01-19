@@ -2559,4 +2559,17 @@ test_expect_success 'cat-file --batch' '
 	ensure_expanded cat-file --batch <in
 '
 
+test_expect_success 'sparse-index is not expanded: check-ignore' '
+	init_repos &&
+
+	# check-ignore for paths in cone should not expand the index
+	# (returns 1 when no paths are ignored)
+	ensure_not_expanded ! check-ignore -- deep/a &&
+	ensure_not_expanded ! check-ignore -v -- deep/a &&
+	ensure_not_expanded ! check-ignore -v -n -- deep/a &&
+
+	# test with --stdin
+	echo deep/a | ensure_not_expanded ! check-ignore --stdin
+'
+
 test_done
