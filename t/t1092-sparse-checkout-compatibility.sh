@@ -2587,4 +2587,14 @@ test_expect_success 'sparse-index is not expanded: config --blob' '
 	ensure_not_expanded config --blob :deep/.testconfig test.value
 '
 
+test_expect_success 'sparse-index is not expanded: maintenance run' '
+	init_repos &&
+
+	# maintenance run should not need to expand the sparse index
+	# Note: git gc intentionally expands the index via pack-objects --indexed-objects
+	# which calls add_index_objects_to_pending() in revision.c - this is necessary
+	# to ensure objects in sparse directories are not garbage collected.
+	ensure_not_expanded maintenance run --task=commit-graph
+'
+
 test_done

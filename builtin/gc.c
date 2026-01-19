@@ -908,6 +908,9 @@ int cmd_gc(int argc,
 	show_usage_with_options_if_asked(argc, argv,
 					 builtin_gc_usage, builtin_gc_options);
 
+	prepare_repo_settings(the_repository);
+	the_repository->settings.command_requires_full_index = 0;
+
 	strvec_pushl(&repack_args, "repack", "-d", "-l", NULL);
 
 	gc_config(&cfg);
@@ -2075,6 +2078,9 @@ static int maintenance_run(int argc, const char **argv, const char *prefix,
 				  opts.schedule, "--schedule=");
 	die_for_incompatible_opt2(selected_tasks.nr, "--task=",
 				  opts.schedule, "--schedule=");
+
+	prepare_repo_settings(the_repository);
+	the_repository->settings.command_requires_full_index = 0;
 
 	gc_config(&cfg);
 	initialize_task_config(&opts, &selected_tasks);
