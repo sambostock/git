@@ -2617,7 +2617,7 @@ test_expect_success 'sparse-index is not expanded: merge-index with file' '
 	# Note: merge-index -a (all files) intentionally expands as it must
 	# iterate all conflicting entries
 	# The ! prefix indicates merge-index exits non-zero due to conflict
-	WITHOUT_UNTRACKED_TXT=1 \
+	test_env WITHOUT_UNTRACKED_TXT=1 \
 		ensure_not_expanded ! merge-index git-merge-one-file deep/a
 '
 

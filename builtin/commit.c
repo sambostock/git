@@ -269,7 +269,12 @@ static int list_paths(struct string_list *list, const char *with_tree,
 		free(max_prefix);
 	}
 
-	/* TODO: audit for interaction with sparse-index. */
+	/*
+	 * TODO: audit for interaction with sparse-index.
+	 * Note: overlay_tree_on_index() above already expands the index
+	 * unconditionally (read-cache.c:3816). Any fix here must first
+	 * address the overlay expansion.
+	 */
 	ensure_full_index(the_repository->index);
 	for (i = 0; i < the_repository->index->cache_nr; i++) {
 		const struct cache_entry *ce = the_repository->index->cache[i];
@@ -1037,8 +1042,12 @@ static int prepare_to_commit(const char *index_file, const char *prefix,
 		if (repo_get_oid(the_repository, parent, &oid)) {
 			int i, ita_nr = 0;
 
-			/* TODO: audit for interaction with sparse-index. */
-			ensure_full_index(the_repository->index);
+			/*
+			 * Sparse directory entries don't have CE_INTENT_TO_ADD,
+			 * so we can iterate the sparse index without expansion.
+			 * The comparison cache_nr > ita_nr still works because
+			 * sparse dirs contribute to cache_nr but not ita_nr.
+			 */
 			for (i = 0; i < the_repository->index->cache_nr; i++)
 				if (ce_intent_to_add(the_repository->index->cache[i]))
 					ita_nr++;
