@@ -1595,7 +1595,14 @@ test_expect_success 'sparse-index is not expanded: stash' '
 	oid=$(git -C sparse-index stash create) &&
 	ensure_not_expanded stash store -m "test" $oid &&
 	ensure_not_expanded reset --hard &&
-	ensure_not_expanded stash pop
+	ensure_not_expanded stash pop &&
+
+	# Stash with pathspec should not expand the index when the pathspec
+	# is in-cone. The pathspec validation iterates index entries but
+	# should use pathspec_needs_expanded_index() to avoid unnecessary
+	# expansion for in-cone paths.
+	echo >>sparse-index/a &&
+	ensure_not_expanded stash push -- a
 '
 
 test_expect_success 'describe tested on all' '
