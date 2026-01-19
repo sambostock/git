@@ -2572,4 +2572,19 @@ test_expect_success 'sparse-index is not expanded: check-ignore' '
 	echo deep/a | ensure_not_expanded ! check-ignore --stdin
 '
 
+test_expect_success 'sparse-index is not expanded: config --blob' '
+	init_repos &&
+
+	# Add a config file inside sparse checkout cone (deep/)
+	cat >sparse-index/deep/.testconfig <<-\EOF &&
+	[test]
+		value = sparse-index-test
+	EOF
+	git -C sparse-index add deep/.testconfig &&
+	git -C sparse-index commit -m "add test config" &&
+
+	# config --blob with in-cone file should not expand the index
+	ensure_not_expanded config --blob :deep/.testconfig test.value
+'
+
 test_done

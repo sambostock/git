@@ -1461,6 +1461,10 @@ int cmd_config(int argc,
 		OPT_END(),
 	};
 
+	repo_config(the_repository, git_default_config, NULL);
+	prepare_repo_settings(the_repository);
+	the_repository->settings.command_requires_full_index = 0;
+
 	/*
 	 * This is somewhat hacky: we first parse the command line while
 	 * keeping all args intact in order to determine whether a subcommand
