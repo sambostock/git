@@ -1460,21 +1460,22 @@ static bool get_first_undecided(const struct file_diff *file_diff, size_t *idx)
 /*
  * Extract the file path from an unmerged file entry.
  * The entry looks like "* Unmerged path <path>\n".
+ * Returns 0 on success, -1 on failure.
  */
-static const char *get_unmerged_path(struct add_p_state *s,
-				     struct file_diff *file_diff)
+static int get_unmerged_path(struct add_p_state *s,
+			     struct file_diff *file_diff,
+			     struct strbuf *out)
 {
-	static struct strbuf path = STRBUF_INIT;
 	const char *start, *end;
 
-	strbuf_reset(&path);
+	strbuf_reset(out);
 	start = s->plain.buf + file_diff->head.start;
 	if (!skip_prefix(start, "* Unmerged path ", &start))
-		return NULL;
+		return -1;
 
 	end = strchrnul(start, '\n');
-	strbuf_add(&path, start, end - start);
-	return path.buf;
+	strbuf_add(out, start, end - start);
+	return 0;
 }
 
 /*
@@ -1542,23 +1543,23 @@ static int checkout_and_stage(struct add_p_state *s, const char *path, int stage
 static int patch_update_unmerged_file(struct add_p_state *s,
 				      struct file_diff *file_diff)
 {
-	const char *path;
+	struct strbuf path = STRBUF_INIT;
 	char ch;
 	int quit = 0;
 	int have_ours, have_theirs;
 
-	path = get_unmerged_path(s, file_diff);
-	if (!path) {
+	if (get_unmerged_path(s, file_diff, &path) < 0) {
 		err(s, _("could not parse unmerged path"));
-		return 0;
+		strbuf_release(&path);
+		return -1;
 	}
 
 	/* Check which stages are available for ours/theirs options */
-	have_ours = has_stage(s, path, 2);
-	have_theirs = has_stage(s, path, 3);
+	have_ours = has_stage(s, path.buf, 2);
+	have_theirs = has_stage(s, path.buf, 3);
 
 	color_fprintf(stdout, s->s.header_color,
-		      _("*** Unmerged path %s\n"), path);
+		      _("*** Unmerged path %s\n"), path.buf);
 
 	for (;;) {
 		printf("%s", s->s.prompt_color);
@@ -1579,12 +1580,12 @@ static int patch_update_unmerged_file(struct add_p_state *s,
 
 		if (ch == 'y') {
 			int ret;
-			if (file_exists(path))
-				ret = add_file_to_index(s->s.r->index, path, 0);
+			if (file_exists(path.buf))
+				ret = add_file_to_index(s->s.r->index, path.buf, 0);
 			else
-				ret = remove_file_from_index(s->s.r->index, path);
+				ret = remove_file_from_index(s->s.r->index, path.buf);
 			if (ret < 0)
-				err(s, _("could not stage '%s'"), path);
+				err(s, _("could not stage '%s'"), path.buf);
 			else
 				repo_refresh_and_write_index(s->s.r,
 							     REFRESH_QUIET, 0,
@@ -1594,11 +1595,11 @@ static int patch_update_unmerged_file(struct add_p_state *s,
 			break;
 		} else if (ch == 'o') {
 			if (!have_ours) {
-				err(s, _("path '%s' does not have our version"), path);
+				err(s, _("path '%s' does not have our version"), path.buf);
 				continue;
 			}
-			if (checkout_and_stage(s, path, 2) < 0)
-				err(s, _("could not use our version of '%s'"), path);
+			if (checkout_and_stage(s, path.buf, 2) < 0)
+				err(s, _("could not use our version of '%s'"), path.buf);
 			else
 				repo_refresh_and_write_index(s->s.r,
 							     REFRESH_QUIET, 0,
@@ -1606,11 +1607,11 @@ static int patch_update_unmerged_file(struct add_p_state *s,
 			break;
 		} else if (ch == 't') {
 			if (!have_theirs) {
-				err(s, _("path '%s' does not have their version"), path);
+				err(s, _("path '%s' does not have their version"), path.buf);
 				continue;
 			}
-			if (checkout_and_stage(s, path, 3) < 0)
-				err(s, _("could not use their version of '%s'"), path);
+			if (checkout_and_stage(s, path.buf, 3) < 0)
+				err(s, _("could not use their version of '%s'"), path.buf);
 			else
 				repo_refresh_and_write_index(s->s.r,
 							     REFRESH_QUIET, 0,
@@ -1633,6 +1634,7 @@ static int patch_update_unmerged_file(struct add_p_state *s,
 	}
 
 	putchar('\n');
+	strbuf_release(&path);
 	return quit;
 }
 
