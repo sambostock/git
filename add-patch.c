@@ -18,6 +18,8 @@
 #include "pathspec.h"
 #include "color.h"
 #include "compat/terminal.h"
+#include "dir.h"
+#include "entry.h"
 #include "prompt.h"
 
 enum prompt_mode_type {
@@ -47,7 +49,7 @@ static struct patch_mode patch_mode_add = {
 		N_("Stage deletion [y,n,q,a,d%s,?]? "),
 		N_("Stage addition [y,n,q,a,d%s,?]? "),
 		N_("Stage this hunk [y,n,q,a,d%s,?]? "),
-		N_("Stage this file as resolved [y,n,q%s,?]? ")
+		N_("Stage this file as resolved [y,n,o,t,q%s,?]? ")
 	},
 	.edit_hunk_hint = N_("If the patch applies cleanly, the edited hunk "
 			     "will immediately be marked for staging."),
@@ -1476,6 +1478,64 @@ static const char *get_unmerged_path(struct add_p_state *s,
 }
 
 /*
+ * Check if a specific stage exists for an unmerged file.
+ * stage should be 2 (ours) or 3 (theirs).
+ */
+static int has_stage(struct add_p_state *s, const char *path, int stage)
+{
+	int pos = index_name_pos(s->s.r->index, path, strlen(path));
+	if (pos >= 0)
+		return 0; /* not unmerged */
+	pos = -pos - 1;
+	while (pos < s->s.r->index->cache_nr) {
+		struct cache_entry *ce = s->s.r->index->cache[pos];
+		if (strcmp(ce->name, path))
+			break;
+		if (ce_stage(ce) == stage)
+			return 1;
+		pos++;
+	}
+	return 0;
+}
+
+/*
+ * Checkout a specific stage (ours=2, theirs=3) to the working tree
+ * and then stage it as resolved.
+ */
+static int checkout_and_stage(struct add_p_state *s, const char *path, int stage)
+{
+	int pos = index_name_pos(s->s.r->index, path, strlen(path));
+	struct checkout state = CHECKOUT_INIT;
+
+	if (pos >= 0)
+		return error(_("path '%s' is not unmerged"), path);
+
+	pos = -pos - 1;
+	state.istate = s->s.r->index;
+	state.force = 1;
+
+	while (pos < s->s.r->index->cache_nr) {
+		struct cache_entry *ce = s->s.r->index->cache[pos];
+		if (strcmp(ce->name, path))
+			break;
+		if (ce_stage(ce) == stage) {
+			if (checkout_entry(ce, &state, NULL, NULL) < 0)
+				return error(_("could not checkout '%s' from stage %d"),
+					     path, stage);
+			if (add_file_to_index(s->s.r->index, path, 0) < 0)
+				return error(_("could not stage '%s'"), path);
+			return 0;
+		}
+		pos++;
+	}
+
+	if (stage == 2)
+		return error(_("path '%s' does not have our version"), path);
+	else
+		return error(_("path '%s' does not have their version"), path);
+}
+
+/*
  * Handle an unmerged file interactively. Unlike regular hunks, unmerged files
  * must be staged as a whole - we cannot select individual changes.
  */
@@ -1485,12 +1545,17 @@ static int patch_update_unmerged_file(struct add_p_state *s,
 	const char *path;
 	char ch;
 	int quit = 0;
+	int have_ours, have_theirs;
 
 	path = get_unmerged_path(s, file_diff);
 	if (!path) {
 		err(s, _("could not parse unmerged path"));
 		return 0;
 	}
+
+	/* Check which stages are available for ours/theirs options */
+	have_ours = has_stage(s, path, 2);
+	have_theirs = has_stage(s, path, 3);
 
 	color_fprintf(stdout, s->s.header_color,
 		      _("*** Unmerged path %s\n"), path);
@@ -1513,7 +1578,12 @@ static int patch_update_unmerged_file(struct add_p_state *s,
 		ch = tolower(s->answer.buf[0]);
 
 		if (ch == 'y') {
-			if (add_file_to_index(s->s.r->index, path, 0) < 0)
+			int ret;
+			if (file_exists(path))
+				ret = add_file_to_index(s->s.r->index, path, 0);
+			else
+				ret = remove_file_from_index(s->s.r->index, path);
+			if (ret < 0)
 				err(s, _("could not stage '%s'"), path);
 			else
 				repo_refresh_and_write_index(s->s.r,
@@ -1522,13 +1592,39 @@ static int patch_update_unmerged_file(struct add_p_state *s,
 			break;
 		} else if (ch == 'n') {
 			break;
+		} else if (ch == 'o') {
+			if (!have_ours) {
+				err(s, _("path '%s' does not have our version"), path);
+				continue;
+			}
+			if (checkout_and_stage(s, path, 2) < 0)
+				err(s, _("could not use our version of '%s'"), path);
+			else
+				repo_refresh_and_write_index(s->s.r,
+							     REFRESH_QUIET, 0,
+							     1, NULL, NULL, NULL);
+			break;
+		} else if (ch == 't') {
+			if (!have_theirs) {
+				err(s, _("path '%s' does not have their version"), path);
+				continue;
+			}
+			if (checkout_and_stage(s, path, 3) < 0)
+				err(s, _("could not use their version of '%s'"), path);
+			else
+				repo_refresh_and_write_index(s->s.r,
+							     REFRESH_QUIET, 0,
+							     1, NULL, NULL, NULL);
+			break;
 		} else if (ch == 'q') {
 			quit = 1;
 			break;
 		} else if (ch == '?') {
 			color_fprintf(stdout, s->s.help_color,
-				      _("y - stage the working tree version as resolved\n"
+				      _("y - stage file as resolved (or deletion if file is missing)\n"
 					"n - do not stage this file\n"
+					"o - use our version (stage 2)\n"
+					"t - use their version (stage 3)\n"
 					"q - quit; do not stage this file or any remaining files\n"
 					"? - print this help\n"));
 		} else {

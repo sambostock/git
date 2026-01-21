@@ -753,8 +753,145 @@ test_expect_success 'patch mode unmerged: ? shows help' '
 	echo resolved >unmerged-conflict.t &&
 	# Ask for help, then skip, then quit
 	printf "%s\n" "?" n q | git add -p >output &&
-	test_grep "stage the working tree version as resolved" output &&
+	test_grep "stage file as resolved" output &&
 	test_grep "do not stage this file" output
+'
+
+test_expect_success 'patch mode unmerged: stage deletion when file removed from worktree' '
+	test_when_finished "git checkout --force main && git branch -D delete-conflict-side 2>/dev/null || true" &&
+	git reset --hard &&
+	# Create a file and commit it
+	echo "original content" >delete-me.t &&
+	git add delete-me.t &&
+	git commit -m "add delete-me.t" &&
+	# Create a branch that modifies the file
+	git checkout -b delete-conflict-side &&
+	echo "modified content" >delete-me.t &&
+	git add delete-me.t &&
+	git commit -m "modify delete-me.t" &&
+	# Go back to main and delete the file
+	git checkout main &&
+	git rm delete-me.t &&
+	git commit -m "delete delete-me.t" &&
+	# Merge should conflict (modify/delete)
+	test_must_fail git merge delete-conflict-side &&
+	# The file exists in worktree (from their side)
+	test_path_is_file delete-me.t &&
+	# User deletes the file to accept the deletion
+	rm delete-me.t &&
+	# Stage the deletion via add -p (y should stage deletion)
+	printf "%s\n" y | git add -p >output &&
+	test_grep "Unmerged path delete-me.t" output &&
+	# File should no longer be unmerged
+	git ls-files --unmerged >unmerged &&
+	test_must_be_empty unmerged &&
+	# File should not be in the index (deletion accepted)
+	git ls-files -- delete-me.t >staged &&
+	test_must_be_empty staged
+'
+
+test_expect_success 'patch mode unmerged: o uses our version' '
+	test_when_finished "git checkout --force main && git branch -D ours-side 2>/dev/null || true" &&
+	git reset --hard &&
+	# Create a file and commit it
+	echo "original content" >ours-test.t &&
+	git add ours-test.t &&
+	git commit -m "add ours-test.t" &&
+	# Create a branch that modifies the file
+	git checkout -b ours-side &&
+	echo "their content" >ours-test.t &&
+	git add ours-test.t &&
+	git commit -m "their change to ours-test.t" &&
+	# Go back to main and make a different change
+	git checkout main &&
+	echo "our content" >ours-test.t &&
+	git add ours-test.t &&
+	git commit -m "our change to ours-test.t" &&
+	# Merge should conflict
+	test_must_fail git merge ours-side &&
+	# Use "o" to pick our version
+	printf "%s\n" o | git add -p >output &&
+	test_grep "Unmerged path ours-test.t" output &&
+	# File should no longer be unmerged
+	git ls-files --unmerged >unmerged &&
+	test_must_be_empty unmerged &&
+	# File should contain our content
+	echo "our content" >expected &&
+	test_cmp expected ours-test.t
+'
+
+test_expect_success 'patch mode unmerged: t uses their version' '
+	test_when_finished "git checkout --force main && git branch -D theirs-side 2>/dev/null || true" &&
+	git reset --hard &&
+	# Create a file and commit it
+	echo "original content" >theirs-test.t &&
+	git add theirs-test.t &&
+	git commit -m "add theirs-test.t" &&
+	# Create a branch that modifies the file
+	git checkout -b theirs-side &&
+	echo "their content" >theirs-test.t &&
+	git add theirs-test.t &&
+	git commit -m "their change to theirs-test.t" &&
+	# Go back to main and make a different change
+	git checkout main &&
+	echo "our content" >theirs-test.t &&
+	git add theirs-test.t &&
+	git commit -m "our change to theirs-test.t" &&
+	# Merge should conflict
+	test_must_fail git merge theirs-side &&
+	# Use "t" to pick their version
+	printf "%s\n" t | git add -p >output &&
+	test_grep "Unmerged path theirs-test.t" output &&
+	# File should no longer be unmerged
+	git ls-files --unmerged >unmerged &&
+	test_must_be_empty unmerged &&
+	# File should contain their content
+	echo "their content" >expected &&
+	test_cmp expected theirs-test.t
+'
+
+test_expect_success 'patch mode unmerged: o fails gracefully when no ours' '
+	test_when_finished "git checkout --force main && git branch -D add-conflict-side 2>/dev/null || true" &&
+	git reset --hard &&
+	# Create a branch that adds a new file
+	git checkout -b add-conflict-side &&
+	echo "their content" >new-file.t &&
+	git add new-file.t &&
+	git commit -m "add new-file.t on side" &&
+	# Go back to main and add same file with different content
+	git checkout main &&
+	echo "our content" >new-file.t &&
+	git add new-file.t &&
+	git commit -m "add new-file.t on main" &&
+	# Merge should conflict (add/add)
+	test_must_fail git merge add-conflict-side &&
+	# Use "o" - should work since both sides added the file
+	printf "%s\n" o | git add -p >output &&
+	# File should no longer be unmerged
+	git ls-files --unmerged >unmerged &&
+	test_must_be_empty unmerged
+'
+
+test_expect_success 'patch mode unmerged: help shows o and t options' '
+	test_when_finished "git checkout --force main && git branch -D help-side 2>/dev/null || true" &&
+	git reset --hard &&
+	# Create a merge conflict situation
+	echo "original" >help-conflict.t &&
+	git add help-conflict.t &&
+	git commit -m "add help-conflict.t" &&
+	git checkout -b help-side &&
+	echo "their side" >help-conflict.t &&
+	git add help-conflict.t &&
+	git commit -m "their change to help-conflict.t" &&
+	git checkout main &&
+	echo "our side" >help-conflict.t &&
+	git add help-conflict.t &&
+	git commit -m "our change to help-conflict.t" &&
+	test_must_fail git merge help-side &&
+	# Ask for help, then skip, then quit
+	printf "%s\n" "?" n q | git add -p >output &&
+	test_grep "use our version" output &&
+	test_grep "use their version" output
 '
 
 test_expect_success 'index is refreshed after applying patch' '
