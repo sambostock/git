@@ -22,6 +22,7 @@
 
 enum prompt_mode_type {
 	PROMPT_MODE_CHANGE = 0, PROMPT_DELETION, PROMPT_ADDITION, PROMPT_HUNK,
+	PROMPT_UNMERGED,
 	PROMPT_MODE_MAX, /* must be last */
 };
 
@@ -38,14 +39,15 @@ struct patch_mode {
 };
 
 static struct patch_mode patch_mode_add = {
-	.diff_cmd = { "diff-files", NULL },
+	.diff_cmd = { "diff-files", "-0", NULL },
 	.apply_args = { "--cached", NULL },
 	.apply_check_args = { "--cached", NULL },
 	.prompt_mode = {
 		N_("Stage mode change [y,n,q,a,d%s,?]? "),
 		N_("Stage deletion [y,n,q,a,d%s,?]? "),
 		N_("Stage addition [y,n,q,a,d%s,?]? "),
-		N_("Stage this hunk [y,n,q,a,d%s,?]? ")
+		N_("Stage this hunk [y,n,q,a,d%s,?]? "),
+		N_("Stage this file as resolved [y,n,q%s,?]? ")
 	},
 	.edit_hunk_hint = N_("If the patch applies cleanly, the edited hunk "
 			     "will immediately be marked for staging."),
@@ -68,6 +70,7 @@ static struct patch_mode patch_mode_stash = {
 		N_("Stash deletion [y,n,q,a,d%s,?]? "),
 		N_("Stash addition [y,n,q,a,d%s,?]? "),
 		N_("Stash this hunk [y,n,q,a,d%s,?]? "),
+		N_("Stash this unmerged file [y,n,q%s,?]? "),
 	},
 	.edit_hunk_hint = N_("If the patch applies cleanly, the edited hunk "
 			     "will immediately be marked for stashing."),
@@ -92,6 +95,7 @@ static struct patch_mode patch_mode_reset_head = {
 		N_("Unstage deletion [y,n,q,a,d%s,?]? "),
 		N_("Unstage addition [y,n,q,a,d%s,?]? "),
 		N_("Unstage this hunk [y,n,q,a,d%s,?]? "),
+		N_("Unstage this resolved file [y,n,q%s,?]? "),
 	},
 	.edit_hunk_hint = N_("If the patch applies cleanly, the edited hunk "
 			     "will immediately be marked for unstaging."),
@@ -115,6 +119,7 @@ static struct patch_mode patch_mode_reset_nothead = {
 		N_("Apply deletion to index [y,n,q,a,d%s,?]? "),
 		N_("Apply addition to index [y,n,q,a,d%s,?]? "),
 		N_("Apply this hunk to index [y,n,q,a,d%s,?]? "),
+		N_("Apply unmerged file to index [y,n,q%s,?]? "),
 	},
 	.edit_hunk_hint = N_("If the patch applies cleanly, the edited hunk "
 			     "will immediately be marked for applying."),
@@ -129,7 +134,7 @@ static struct patch_mode patch_mode_reset_nothead = {
 };
 
 static struct patch_mode patch_mode_checkout_index = {
-	.diff_cmd = { "diff-files", NULL },
+	.diff_cmd = { "diff-files", "-0", NULL },
 	.apply_args = { "-R", NULL },
 	.apply_check_args = { "-R", NULL },
 	.is_reverse = 1,
@@ -138,6 +143,7 @@ static struct patch_mode patch_mode_checkout_index = {
 		N_("Discard deletion from worktree [y,n,q,a,d%s,?]? "),
 		N_("Discard addition from worktree [y,n,q,a,d%s,?]? "),
 		N_("Discard this hunk from worktree [y,n,q,a,d%s,?]? "),
+		N_("Discard unmerged file from worktree [y,n,q%s,?]? "),
 	},
 	.edit_hunk_hint = N_("If the patch applies cleanly, the edited hunk "
 			     "will immediately be marked for discarding."),
@@ -161,6 +167,7 @@ static struct patch_mode patch_mode_checkout_head = {
 		N_("Discard deletion from index and worktree [y,n,q,a,d%s,?]? "),
 		N_("Discard addition from index and worktree [y,n,q,a,d%s,?]? "),
 		N_("Discard this hunk from index and worktree [y,n,q,a,d%s,?]? "),
+		N_("Discard unmerged file from index and worktree [y,n,q%s,?]? "),
 	},
 	.edit_hunk_hint = N_("If the patch applies cleanly, the edited hunk "
 			     "will immediately be marked for discarding."),
@@ -183,6 +190,7 @@ static struct patch_mode patch_mode_checkout_nothead = {
 		N_("Apply deletion to index and worktree [y,n,q,a,d%s,?]? "),
 		N_("Apply addition to index and worktree [y,n,q,a,d%s,?]? "),
 		N_("Apply this hunk to index and worktree [y,n,q,a,d%s,?]? "),
+		N_("Apply unmerged file to index and worktree [y,n,q%s,?]? "),
 	},
 	.edit_hunk_hint = N_("If the patch applies cleanly, the edited hunk "
 			     "will immediately be marked for applying."),
@@ -206,6 +214,7 @@ static struct patch_mode patch_mode_worktree_head = {
 		N_("Discard deletion from worktree [y,n,q,a,d%s,?]? "),
 		N_("Discard addition from worktree [y,n,q,a,d%s,?]? "),
 		N_("Discard this hunk from worktree [y,n,q,a,d%s,?]? "),
+		N_("Discard unmerged file from worktree [y,n,q%s,?]? "),
 	},
 	.edit_hunk_hint = N_("If the patch applies cleanly, the edited hunk "
 			     "will immediately be marked for discarding."),
@@ -228,6 +237,7 @@ static struct patch_mode patch_mode_worktree_nothead = {
 		N_("Apply deletion to worktree [y,n,q,a,d%s,?]? "),
 		N_("Apply addition to worktree [y,n,q,a,d%s,?]? "),
 		N_("Apply this hunk to worktree [y,n,q,a,d%s,?]? "),
+		N_("Apply unmerged file to worktree [y,n,q%s,?]? "),
 	},
 	.edit_hunk_hint = N_("If the patch applies cleanly, the edited hunk "
 			     "will immediately be marked for applying."),
@@ -269,7 +279,7 @@ struct add_p_state {
 		struct hunk head;
 		struct hunk *hunk;
 		size_t hunk_nr, hunk_alloc;
-		unsigned deleted:1, added:1, mode_change:1,binary:1;
+		unsigned deleted:1, added:1, mode_change:1, binary:1, unmerged:1;
 	} *file_diff;
 	size_t file_diff_nr;
 
@@ -506,6 +516,8 @@ static int parse_diff(struct add_p_state *s, const struct pathspec *ps)
 
 		if (starts_with(p, "diff ") ||
 		    starts_with(p, "* Unmerged path ")) {
+			int is_unmerged = starts_with(p, "* Unmerged path ");
+
 			complete_file(marker, hunk);
 			ALLOC_GROW_BY(s->file_diff, s->file_diff_nr, 1,
 				   file_diff_alloc);
@@ -514,6 +526,8 @@ static int parse_diff(struct add_p_state *s, const struct pathspec *ps)
 			hunk->start = p - plain->buf;
 			if (colored_p)
 				hunk->colored_start = colored_p - colored->buf;
+			if (is_unmerged)
+				file_diff->unmerged = 1;
 			marker = '\0';
 		} else if (p == plain->buf)
 			BUG("diff starts with unexpected line:\n"
@@ -1441,6 +1455,91 @@ static bool get_first_undecided(const struct file_diff *file_diff, size_t *idx)
 	return false;
 }
 
+/*
+ * Extract the file path from an unmerged file entry.
+ * The entry looks like "* Unmerged path <path>\n".
+ */
+static const char *get_unmerged_path(struct add_p_state *s,
+				     struct file_diff *file_diff)
+{
+	static struct strbuf path = STRBUF_INIT;
+	const char *start, *end;
+
+	strbuf_reset(&path);
+	start = s->plain.buf + file_diff->head.start;
+	if (!skip_prefix(start, "* Unmerged path ", &start))
+		return NULL;
+
+	end = strchrnul(start, '\n');
+	strbuf_add(&path, start, end - start);
+	return path.buf;
+}
+
+/*
+ * Handle an unmerged file interactively. Unlike regular hunks, unmerged files
+ * must be staged as a whole - we cannot select individual changes.
+ */
+static int patch_update_unmerged_file(struct add_p_state *s,
+				      struct file_diff *file_diff)
+{
+	const char *path;
+	char ch;
+	int quit = 0;
+
+	path = get_unmerged_path(s, file_diff);
+	if (!path) {
+		err(s, _("could not parse unmerged path"));
+		return 0;
+	}
+
+	color_fprintf(stdout, s->s.header_color,
+		      _("*** Unmerged path %s\n"), path);
+
+	for (;;) {
+		printf("%s", s->s.prompt_color);
+		printf(_(s->mode->prompt_mode[PROMPT_UNMERGED]), "");
+		if (*s->s.reset_color_interactive)
+			fputs(s->s.reset_color_interactive, stdout);
+		fflush(stdout);
+
+		if (read_single_character(s) == EOF) {
+			quit = 1;
+			break;
+		}
+
+		if (!s->answer.len)
+			continue;
+
+		ch = tolower(s->answer.buf[0]);
+
+		if (ch == 'y') {
+			if (add_file_to_index(s->s.r->index, path, 0) < 0)
+				err(s, _("could not stage '%s'"), path);
+			else
+				repo_refresh_and_write_index(s->s.r,
+							     REFRESH_QUIET, 0,
+							     1, NULL, NULL, NULL);
+			break;
+		} else if (ch == 'n') {
+			break;
+		} else if (ch == 'q') {
+			quit = 1;
+			break;
+		} else if (ch == '?') {
+			color_fprintf(stdout, s->s.help_color,
+				      _("y - stage the working tree version as resolved\n"
+					"n - do not stage this file\n"
+					"q - quit; do not stage this file or any remaining files\n"
+					"? - print this help\n"));
+		} else {
+			err(s, _("Unknown command '%c' (use '?' for help)"), ch);
+		}
+	}
+
+	putchar('\n');
+	return quit;
+}
+
 static int patch_update_file(struct add_p_state *s,
 			     struct file_diff *file_diff)
 {
@@ -1814,6 +1913,7 @@ int run_add_p(struct repository *r, enum add_p_mode mode,
 		{ r }, STRBUF_INIT, STRBUF_INIT, STRBUF_INIT, STRBUF_INIT
 	};
 	size_t i, binary_count = 0;
+	int handle_unmerged = (mode == ADD_P_ADD);
 
 	init_add_i_state(&s.s, r, o);
 
@@ -1845,8 +1945,8 @@ int run_add_p(struct repository *r, enum add_p_mode mode,
 	discard_index(r->index);
 	if (repo_read_index(r) < 0 ||
 	    (!s.mode->index_only &&
-	     repo_refresh_and_write_index(r, REFRESH_QUIET, 0, 1,
-					  NULL, NULL, NULL) < 0) ||
+	     repo_refresh_and_write_index(r, REFRESH_QUIET | REFRESH_UNMERGED,
+					  0, 1, NULL, NULL, NULL) < 0) ||
 	    parse_diff(&s, ps) < 0) {
 		add_p_state_clear(&s);
 		return -1;
@@ -1855,7 +1955,11 @@ int run_add_p(struct repository *r, enum add_p_mode mode,
 	for (i = 0; i < s.file_diff_nr; i++)
 		if (s.file_diff[i].binary && !s.file_diff[i].hunk_nr)
 			binary_count++;
-		else if (patch_update_file(&s, s.file_diff + i))
+		else if (s.file_diff[i].unmerged && handle_unmerged) {
+			if (patch_update_unmerged_file(&s, s.file_diff + i))
+				break;
+		} else if (!s.file_diff[i].unmerged &&
+			   patch_update_file(&s, s.file_diff + i))
 			break;
 
 	if (s.file_diff_nr == 0)

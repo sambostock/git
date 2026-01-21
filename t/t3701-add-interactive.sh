@@ -685,30 +685,76 @@ test_expect_success 'edit, adding lines to the first hunk' '
 	test_grep "^+22" actual
 '
 
-test_expect_success 'patch mode ignores unmerged entries' '
+test_expect_success 'patch mode handles unmerged entries' '
 	git reset --hard &&
-	test_commit conflict &&
-	test_commit non-conflict &&
-	git checkout -b side &&
-	test_commit side conflict.t &&
+	test_when_finished "git checkout --force main && git branch -D unmerged-side 2>/dev/null || true" &&
+	test_commit unmerged-conflict &&
+	test_commit unmerged-non-conflict &&
+	git checkout -b unmerged-side &&
+	test_commit unmerged-side unmerged-conflict.t &&
 	git checkout main &&
-	test_commit main conflict.t &&
-	test_must_fail git merge side &&
-	echo changed >non-conflict.t &&
-	echo y | git add -p >output &&
-	test_grep ! a/conflict.t output &&
-	cat >expected <<-\EOF &&
-	* Unmerged path conflict.t
-	diff --git a/non-conflict.t b/non-conflict.t
-	index f766221..5ea2ed4 100644
-	--- a/non-conflict.t
-	+++ b/non-conflict.t
-	@@ -1 +1 @@
-	-non-conflict
-	+changed
-	EOF
-	git diff --cached >diff &&
-	diff_cmp expected diff
+	test_commit unmerged-main unmerged-conflict.t &&
+	test_must_fail git merge unmerged-side &&
+	# Resolve the conflict by picking our version
+	echo resolved >unmerged-conflict.t &&
+	echo changed >unmerged-non-conflict.t &&
+	# Stage both: first the unmerged file (y), then the normal change (y)
+	printf "%s\n" y y | git add -p >output &&
+	# Verify the unmerged prompt was shown
+	test_grep "Unmerged path unmerged-conflict.t" output &&
+	test_grep "Stage.*as resolved" output &&
+	# Verify unmerged-conflict.t is no longer unmerged (staged as resolved)
+	git ls-files --unmerged >unmerged &&
+	test_must_be_empty unmerged &&
+	# Verify unmerged-non-conflict.t was also staged
+	git diff --cached --name-only >staged &&
+	test_grep unmerged-non-conflict.t staged
+'
+
+test_expect_success 'patch mode unmerged: n skips file' '
+	git reset --hard &&
+	git checkout main &&
+	test_must_fail git merge unmerged-side &&
+	echo resolved >unmerged-conflict.t &&
+	echo changed >unmerged-non-conflict.t &&
+	# Skip unmerged file (n), stage normal change (y)
+	printf "%s\n" n y | git add -p >output &&
+	test_grep "Unmerged path unmerged-conflict.t" output &&
+	# unmerged-conflict.t should still be unmerged
+	git ls-files --unmerged >unmerged &&
+	test_grep unmerged-conflict.t unmerged &&
+	# unmerged-non-conflict.t should be staged
+	git diff --cached --diff-filter=M --name-only >staged &&
+	test_grep unmerged-non-conflict.t staged
+'
+
+test_expect_success 'patch mode unmerged: q quits' '
+	git reset --hard &&
+	git checkout main &&
+	test_must_fail git merge unmerged-side &&
+	echo resolved >unmerged-conflict.t &&
+	echo changed >unmerged-non-conflict.t &&
+	# Quit at unmerged file prompt
+	printf "%s\n" q | git add -p >output &&
+	test_grep "Unmerged path unmerged-conflict.t" output &&
+	# unmerged-conflict.t should still be unmerged
+	git ls-files --unmerged >unmerged &&
+	test_grep unmerged-conflict.t unmerged &&
+	# unmerged-non-conflict.t should not be staged (quit before processing it)
+	git diff --cached --diff-filter=M --name-only >staged &&
+	test_must_be_empty staged
+'
+
+test_expect_success 'patch mode unmerged: ? shows help' '
+	test_when_finished "git checkout --force main && git branch -D unmerged-side 2>/dev/null || true" &&
+	git reset --hard &&
+	git checkout main &&
+	test_must_fail git merge unmerged-side &&
+	echo resolved >unmerged-conflict.t &&
+	# Ask for help, then skip, then quit
+	printf "%s\n" "?" n q | git add -p >output &&
+	test_grep "stage the working tree version as resolved" output &&
+	test_grep "do not stage this file" output
 '
 
 test_expect_success 'index is refreshed after applying patch' '

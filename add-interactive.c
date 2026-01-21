@@ -983,18 +983,11 @@ static int run_patch(struct add_i_state *s, const struct pathspec *ps,
 			       &unmerged_count, &binary_count) < 0)
 		return -1;
 
-	if (unmerged_count || binary_count) {
+	if (binary_count) {
 		for (i = j = 0; i < files->items.nr; i++) {
 			struct file_item *item = files->items.items[i].util;
 
 			if (item->index.binary || item->worktree.binary) {
-				free(item);
-				free(files->items.items[i].string);
-			} else if (item->index.unmerged ||
-				 item->worktree.unmerged) {
-				color_fprintf_ln(stderr, s->error_color,
-						 _("ignoring unmerged: %s"),
-						 files->items.items[i].string);
 				free(item);
 				free(files->items.items[i].string);
 			} else
