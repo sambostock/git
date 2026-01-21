@@ -1,0 +1,385 @@
+Interactive Staging of Unmerged Files in git add -p
+===================================================
+
+Motivation
+----------
+
+When resolving merge conflicts, users often want to stage files interactively.
+Currently, `git add -p` ignores unmerged files with the message:
+
+    $ git add -p
+    grpc/src/models/v3/cdp/sales_account_identifier.rs: needs merge
+
+This is confusing because `git add <file>` successfully stages the resolved
+file, but `git add -p` offers no way to do the same interactively.
+
+Users expect that if `git add <file>` solves their problem during merge
+conflict resolution, then `git add -p` should interactively offer that
+option as well.
+
+
+Current Behavior
+----------------
+
+1. `git add -p` runs `get_modified_files()` which detects unmerged files
+2. In `run_patch()`, unmerged files are filtered out with an error message
+3. The user never sees unmerged files in the interactive prompt
+4. To stage a resolved file, user must exit and run `git add <file>` manually
+
+
+Proposed Behavior
+-----------------
+
+When `git add -p` encounters unmerged files during a merge:
+
+1. Include unmerged files in the file selection menu
+2. Mark them clearly as "(unmerged)" in the file list
+3. When the user selects an unmerged file, present a simplified prompt:
+
+    *** Commands ***
+      1: [s]tage resolved  2: [k]eep unmerged
+      3: [d]iff            4: [?] help
+    What now>
+
+   Or in patch mode directly:
+
+    Stage this file as resolved? [y,n,d,?]
+
+4. Options:
+   - y/s: Stage the working tree version (like `git add <file>`)
+   - n/k: Skip this file, leave unmerged
+   - d: Show diff between working tree and merge base (or combined diff)
+   - ?: Show help explaining the options
+
+
+Implementation Plan
+-------------------
+
+Phase 1: Data Structure Changes
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+1. Add `unmerged:1` flag to `struct file_diff` in add-patch.c:
+
+    struct file_diff {
+        struct hunk head;
+        struct hunk *hunk;
+        size_t hunk_nr, hunk_alloc;
+        unsigned deleted:1, added:1, mode_change:1, binary:1;
+    +   unsigned unmerged:1;
+    };
+
+2. Track unmerged status through the pipeline.
+
+
+Phase 2: Remove Filtering in add-interactive.c
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+1. In `run_patch()` (add-interactive.c), stop filtering out unmerged files
+2. Instead of printing "ignoring unmerged: %s", keep them in the list
+3. Mark them for special handling downstream
+
+
+Phase 3: Handle Unmerged Files in Patch Mode (add-patch.c)
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+1. In `run_add_p()`, detect files marked as unmerged
+2. For unmerged files, skip normal hunk selection
+3. Present simplified staging prompt
+4. If user confirms, stage the file using the index API
+
+
+Phase 4: Index Operations
+~~~~~~~~~~~~~~~~~~~~~~~~~
+
+To stage an unmerged file as resolved:
+
+1. Read the working tree content
+2. Hash the blob
+3. Remove stage 1, 2, 3 entries for the path
+4. Add a stage 0 entry with the new blob hash
+
+This is equivalent to what `git add <file>` does.
+
+
+User Interface Details
+----------------------
+
+File List Display
+~~~~~~~~~~~~~~~~~
+
+In interactive mode (`git add -i`), unmerged files appear with a marker:
+
+    staged     unstaged path
+    1:        +5/-0     file.c
+    2:      (unmerged)  conflict.rs
+    3:        +1/-1     other.c
+
+Patch Mode Prompt
+~~~~~~~~~~~~~~~~~
+
+For unmerged files, show a simplified prompt instead of hunk-by-hunk:
+
+    diff --cc conflict.rs
+    index abc123,def456..000000
+    --- a/conflict.rs
+    +++ b/conflict.rs
+    @@@ ... @@@
+    [file contents with conflict markers if not resolved]
+
+    This file has merge conflicts.
+    Stage this file as resolved? [y,n,d,?]
+
+If the file still contains conflict markers (<<<<<<< etc), warn:
+
+    Warning: This file appears to still contain conflict markers.
+    Stage anyway? [y,n]
+
+
+Help Text
+~~~~~~~~~
+
+When user presses '?' on an unmerged file:
+
+    y - stage the working tree version as resolved
+    n - skip this file, keep it unmerged
+    d - view diff (working tree vs merge base)
+    ? - show this help
+
+    Note: Unlike regular hunks, unmerged files must be staged
+    as a whole. You cannot select individual changes.
+
+
+Conflict Resolution Workflows
+-----------------------------
+
+Users resolve merge conflicts in various ways. The interactive prompt must
+support all common workflows:
+
+1. Manual file editing
+   - User edits the file to resolve conflicts
+   - User runs `git add -p`, presses 'y' to stage working tree version
+   - This is the most common workflow
+
+2. Merge tool usage
+   - User runs `git mergetool` which updates the working tree
+   - User runs `git add -p`, presses 'y' to stage working tree version
+   - Same as manual editing from git's perspective
+
+3. Choosing "ours" version entirely
+   - User wants to keep their version, discard theirs
+   - User presses 'o' to checkout and stage stage-2 (ours) version
+   - Equivalent to: `git checkout --ours <file> && git add <file>`
+
+4. Choosing "theirs" version entirely
+   - User wants to accept incoming changes, discard ours
+   - User presses 't' to checkout and stage stage-3 (theirs) version
+   - Equivalent to: `git checkout --theirs <file> && git add <file>`
+
+5. Accepting a deletion (modify/delete conflict)
+   - One branch modified the file, the other deleted it
+   - User wants to accept the deletion
+   - User presses 'd' or deletes file then 'y' to stage deletion
+   - Equivalent to: `git rm <file>`
+
+6. Keeping a file (modify/delete conflict)
+   - One branch modified the file, the other deleted it
+   - User wants to keep the file
+   - User edits file if needed, presses 'y' to stage working tree version
+   - Equivalent to: `git add <file>`
+
+
+Prompt Variations
+-----------------
+
+The prompt adapts based on the conflict type and working tree state:
+
+Content conflict (both sides modified):
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+    *** Unmerged path file.txt
+    Stage this file as resolved [y,n,o,t,q,?]?
+
+    y - stage the working tree version as resolved
+    n - do not stage this file
+    o - use our version (HEAD)
+    t - use their version (MERGE_HEAD)
+    q - quit; do not stage this file or any remaining files
+    ? - print this help
+
+Modify/delete conflict (file exists in working tree):
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+    *** Unmerged path file.txt (deleted by them)
+    Stage this file as resolved [y,n,d,q,?]?
+
+    y - keep the file (stage working tree version)
+    n - do not stage this file
+    d - accept deletion (remove the file)
+    q - quit
+    ? - print this help
+
+Or if deleted by us:
+
+    *** Unmerged path file.txt (deleted by us)
+    Stage this file as resolved [y,n,d,q,?]?
+
+Modify/delete conflict (file deleted from working tree):
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+    *** Unmerged path file.txt (deleted in working tree)
+    Stage deletion as resolved [y,n,q,?]?
+
+    y - stage the deletion
+    n - do not stage this file
+    q - quit
+    ? - print this help
+
+
+Index Stage Reference
+---------------------
+
+During a merge conflict, git stores multiple versions in the index:
+
+- Stage 0: Normal, resolved entry (not present during conflict)
+- Stage 1: Common ancestor version (merge base)
+- Stage 2: Our version (from HEAD, the current branch)
+- Stage 3: Their version (from MERGE_HEAD, the incoming branch)
+
+For modify/delete conflicts:
+- If we modified and they deleted: stages 1 and 2 exist, stage 3 is empty
+- If they modified and we deleted: stages 1 and 3 exist, stage 2 is empty
+
+
+Edge Cases
+----------
+
+1. File with unresolved conflict markers
+   - Detect markers (<<<<<<< ======= >>>>>>>)
+   - Warn user but allow staging (same as `git add`)
+
+2. File deleted in working tree during merge
+   - Show appropriate message
+   - Allow staging deletion with 'y'
+
+3. File is both unmerged and binary
+   - Handle like regular binary files
+   - Stage whole file without diff display
+   - ours/theirs options still available
+
+4. Multiple unmerged files
+   - Process each in turn
+   - Allow user to skip individual files
+
+5. Stage missing in index
+   - If stage 2 missing, 'o' option not available
+   - If stage 3 missing, 't' option not available
+   - Adjust prompt to only show valid options
+
+6. File only exists in one stage (add/add conflict)
+   - Both branches added a file independently
+   - All three stages present (base is empty/null)
+   - ours/theirs options both available
+
+
+Test Plan
+---------
+
+Add tests to t/t3701-add-interactive.sh:
+
+Phase 1 Tests (basic functionality):
+
+1. Basic merge conflict staging
+   - Create merge conflict
+   - Run `git add -p` with 'y' response
+   - Verify file is staged and no longer unmerged
+
+2. Skip unmerged file
+   - Create merge conflict
+   - Run `git add -p` with 'n' response
+   - Verify file remains unmerged
+
+3. Quit processing
+   - Create merge conflict with multiple files
+   - Run `git add -p` with 'q' response
+   - Verify remaining files not processed
+
+4. Help display
+   - Create merge conflict
+   - Run `git add -p` with '?' response
+   - Verify help text is shown
+
+Phase 2 Tests (enhanced conflict resolution):
+
+5. Use ours version
+   - Create content conflict (both sides modified)
+   - Run `git add -p` with 'o' response
+   - Verify stage-2 version is checked out and staged
+
+6. Use theirs version
+   - Create content conflict (both sides modified)
+   - Run `git add -p` with 't' response
+   - Verify stage-3 version is checked out and staged
+
+7. Accept deletion (modify/delete conflict)
+   - Create modify/delete conflict (we modified, they deleted)
+   - File exists in working tree
+   - Run `git add -p` with 'd' response
+   - Verify file is removed and staged as deletion
+
+8. Keep file (modify/delete conflict)
+   - Create modify/delete conflict (we modified, they deleted)
+   - Run `git add -p` with 'y' response
+   - Verify working tree version is staged
+
+9. Stage deletion from working tree
+   - Create modify/delete conflict
+   - User deletes file from working tree
+   - Run `git add -p` with 'y' response
+   - Verify deletion is staged
+
+10. Multiple files (mixed conflict types)
+    - Create merge with content conflict and modify/delete conflict
+    - Run `git add -p`
+    - Verify both can be processed with appropriate prompts
+
+Future Tests (nice to have):
+
+11. Warning for conflict markers
+    - Create merge conflict with unresolved markers
+    - Run `git add -p`
+    - Verify warning is shown
+
+12. Binary unmerged file
+    - Create merge conflict with binary file
+    - Verify appropriate handling
+
+
+Compatibility
+-------------
+
+This change is backward compatible:
+
+- New behavior only activates when unmerged files exist
+- Default action ('n') preserves current effective behavior
+- No changes to command-line interface or options
+- Existing scripts piping 'y' or 'n' will still work
+
+
+Related Commands
+----------------
+
+Similar enhancement could apply to:
+
+- `git reset -p` - unstage resolved files back to unmerged state
+- `git checkout -p` - restore unmerged file to a specific version
+- `git stash -p` - stash unmerged files
+
+These are out of scope for this initial implementation but follow
+the same pattern.
+
+
+References
+----------
+
+- Git mailing list discussion: [TODO: link if any]
+- Related issue: User expectation that `git add -p` handles merge conflicts
