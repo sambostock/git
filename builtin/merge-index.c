@@ -2,8 +2,11 @@
 #define DISABLE_SIGN_COMPARE_WARNINGS
 
 #include "builtin.h"
+#include "config.h"
+#include "environment.h"
 #include "hex.h"
 #include "read-cache-ll.h"
+#include "repository.h"
 #include "run-command.h"
 #include "sparse-index.h"
 
@@ -52,7 +55,16 @@ static int merge_entry(int pos, const char *path)
 
 static void merge_one_path(const char *path)
 {
-	int pos = index_name_pos(the_repository->index, path, strlen(path));
+	int pos;
+	size_t pathlen = strlen(path);
+
+	/*
+	 * If the path is inside a sparse directory, expand just that
+	 * directory rather than the entire index.
+	 */
+	expand_to_path(the_repository->index, path, pathlen, 0);
+
+	pos = index_name_pos(the_repository->index, path, pathlen);
 
 	/*
 	 * If it already exists in the cache as stage0, it's
@@ -95,10 +107,22 @@ int cmd_merge_index(int argc,
 	if (argc < 3)
 		usage(usage_string);
 
-	repo_read_index(the_repository);
+	/*
+	 * Load configuration so that core.sparseCheckout and
+	 * core.sparseCheckoutCone settings are available for
+	 * sparse-index handling.
+	 */
+	repo_config(the_repository, git_default_config, NULL);
 
-	/* TODO: audit for interaction with sparse-index. */
-	ensure_full_index(the_repository->index);
+	/*
+	 * Opt into sparse-index mode: when explicit file paths are given,
+	 * we use expand_to_path() for targeted expansion rather than
+	 * expanding the entire index upfront.
+	 */
+	prepare_repo_settings(the_repository);
+	the_repository->settings.command_requires_full_index = 0;
+
+	repo_read_index(the_repository);
 
 	i = 1;
 	if (!strcmp(argv[i], "-o")) {

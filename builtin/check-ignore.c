@@ -183,6 +183,9 @@ int cmd_check_ignore(int argc,
 	if (show_non_matching && !verbose)
 		die(_("--non-matching is only valid with --verbose"));
 
+	prepare_repo_settings(the_repository);
+	the_repository->settings.command_requires_full_index = 0;
+
 	/* read_cache() is only necessary so we can watch out for submodules. */
 	if (!no_index && repo_read_index(the_repository) < 0)
 		die(_("index file corrupt"));

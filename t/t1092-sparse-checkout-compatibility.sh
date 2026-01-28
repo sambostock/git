@@ -1595,7 +1595,14 @@ test_expect_success 'sparse-index is not expanded: stash' '
 	oid=$(git -C sparse-index stash create) &&
 	ensure_not_expanded stash store -m "test" $oid &&
 	ensure_not_expanded reset --hard &&
-	ensure_not_expanded stash pop
+	ensure_not_expanded stash pop &&
+
+	# Stash with pathspec should not expand the index when the pathspec
+	# is in-cone. The pathspec validation iterates index entries but
+	# should use pathspec_needs_expanded_index() to avoid unnecessary
+	# expansion for in-cone paths.
+	echo >>sparse-index/a &&
+	ensure_not_expanded stash push -- a
 '
 
 test_expect_success 'describe tested on all' '
@@ -2557,6 +2564,68 @@ test_expect_success 'cat-file --batch' '
 	EOF
 	test_all_match git cat-file --batch <in &&
 	ensure_expanded cat-file --batch <in
+'
+
+test_expect_success 'sparse-index is not expanded: check-ignore' '
+	init_repos &&
+
+	# check-ignore for paths in cone should not expand the index
+	# (returns 1 when no paths are ignored)
+	ensure_not_expanded ! check-ignore -- deep/a &&
+	ensure_not_expanded ! check-ignore -v -- deep/a &&
+	ensure_not_expanded ! check-ignore -v -n -- deep/a &&
+
+	# test with --stdin
+	echo deep/a | ensure_not_expanded ! check-ignore --stdin
+'
+
+test_expect_success 'sparse-index is not expanded: config --blob' '
+	init_repos &&
+
+	# Add a config file inside sparse checkout cone (deep/)
+	cat >sparse-index/deep/.testconfig <<-\EOF &&
+	[test]
+		value = sparse-index-test
+	EOF
+	git -C sparse-index add deep/.testconfig &&
+	git -C sparse-index commit -m "add test config" &&
+
+	# config --blob with in-cone file should not expand the index
+	ensure_not_expanded config --blob :deep/.testconfig test.value
+'
+
+test_expect_success 'sparse-index is not expanded: maintenance run' '
+	init_repos &&
+
+	# maintenance run should not need to expand the sparse index
+	# Note: git gc intentionally expands the index via pack-objects --indexed-objects
+	# which calls add_index_objects_to_pending() in revision.c - this is necessary
+	# to ensure objects in sparse directories are not garbage collected.
+	ensure_not_expanded maintenance run --task=commit-graph
+'
+
+test_expect_success 'sparse-index is not expanded: merge-index with file' '
+	init_repos &&
+
+	# Create a merge conflict in a file within the sparse cone
+	for side in right left
+	do
+		git -C sparse-index checkout -b merge-index-$side base &&
+		echo $side >sparse-index/deep/a &&
+		git -C sparse-index commit -a -m "$side" || return 1
+	done &&
+
+	# Create 3-way merge state with conflict in the index
+	git -C sparse-index checkout merge-index-left &&
+	git -C sparse-index read-tree -m \
+		base merge-index-left merge-index-right &&
+
+	# merge-index with explicit file path should not expand the index
+	# Note: merge-index -a (all files) intentionally expands as it must
+	# iterate all conflicting entries
+	# The ! prefix indicates merge-index exits non-zero due to conflict
+	test_env WITHOUT_UNTRACKED_TXT=1 \
+		ensure_not_expanded ! merge-index git-merge-one-file deep/a
 '
 
 test_done
