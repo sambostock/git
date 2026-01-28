@@ -1497,6 +1497,14 @@ test_expect_success 'sparse-index is not expanded' '
 	ensure_not_expanded commit --include a -m a &&
 	echo >>sparse-index/deep/deeper1/a &&
 	ensure_not_expanded commit --include deep/deeper1/a -m deeper &&
+
+	# Partial commits (git commit -- <paths>) should not expand
+	# (list_paths() and overlay_tree_on_index() are now sparse-aware)
+	echo >>sparse-index/a &&
+	ensure_not_expanded commit -m "partial commit root file" -- a &&
+	echo >>sparse-index/deep/deeper1/a &&
+	ensure_not_expanded commit -m "partial commit deep file" -- deep/deeper1/a &&
+
 	ensure_not_expanded checkout rename-out-to-out &&
 	ensure_not_expanded checkout - &&
 	ensure_not_expanded switch rename-out-to-out &&
@@ -2557,6 +2565,16 @@ test_expect_success 'cat-file --batch' '
 	EOF
 	test_all_match git cat-file --batch <in &&
 	ensure_expanded cat-file --batch <in
+'
+
+test_expect_success 'merge-index does not expand sparse index' '
+	init_repos &&
+
+	# With no unmerged entries, merge-index -a should do nothing
+	# and not expand the sparse index. The command sets
+	# command_requires_full_index = 0, so the index stays sparse.
+	run_sparse_index_trace2 merge-index echo -a &&
+	test_region ! index ensure_full_index trace2.txt
 '
 
 test_done

@@ -606,9 +606,6 @@ static int run_dir_diff(struct repository *repo,
 	strvec_pushl(&cmd.args, ldir.buf, rdir.buf, NULL);
 	ret = run_command(&cmd);
 
-	/* TODO: audit for interaction with sparse-index. */
-	ensure_full_index(&wtindex);
-
 	/*
 	 * If the diff includes working copy files and those
 	 * files were modified during the diff, then the changes

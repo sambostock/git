@@ -2,10 +2,12 @@
 #define DISABLE_SIGN_COMPARE_WARNINGS
 
 #include "builtin.h"
+#include "config.h"
+#include "environment.h"
 #include "hex.h"
 #include "read-cache-ll.h"
+#include "repo-settings.h"
 #include "run-command.h"
-#include "sparse-index.h"
 
 static const char *pgm;
 static int one_shot, quiet;
@@ -65,8 +67,13 @@ static void merge_one_path(const char *path)
 static void merge_all(void)
 {
 	int i;
-	/* TODO: audit for interaction with sparse-index. */
-	ensure_full_index(the_repository->index);
+	/*
+	 * Sparse directory entries have stage 0 (they represent collapsed
+	 * trees in the normal state), while unmerged entries have stages 1-3.
+	 * The loop below only processes non-zero stage entries, so sparse
+	 * directory entries are automatically skipped and no index expansion
+	 * is needed.
+	 */
 	for (i = 0; i < the_repository->index->cache_nr; i++) {
 		const struct cache_entry *ce = the_repository->index->cache[i];
 		if (!ce_stage(ce))
@@ -95,10 +102,25 @@ int cmd_merge_index(int argc,
 	if (argc < 3)
 		usage(usage_string);
 
-	repo_read_index(the_repository);
+	/*
+	 * Read config to initialize core_apply_sparse_checkout and
+	 * core_sparse_checkout_cone which are needed by is_sparse_index_allowed().
+	 */
+	repo_config(the_repository, git_default_config, NULL);
 
-	/* TODO: audit for interaction with sparse-index. */
-	ensure_full_index(the_repository->index);
+	/*
+	 * Sparse-index is compatible with merge-index:
+	 * - For specific paths: index_name_pos() auto-expands if the path
+	 *   is inside a sparse directory
+	 * - For -a (all): merge_all() only processes non-zero stage entries,
+	 *   and sparse directory entries are always stage 0
+	 *
+	 * Must be set before repo_read_index() to prevent automatic expansion.
+	 */
+	prepare_repo_settings(the_repository);
+	the_repository->settings.command_requires_full_index = 0;
+
+	repo_read_index(the_repository);
 
 	i = 1;
 	if (!strcmp(argv[i], "-o")) {

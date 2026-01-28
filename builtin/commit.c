@@ -269,8 +269,11 @@ static int list_paths(struct string_list *list, const char *with_tree,
 		free(max_prefix);
 	}
 
-	/* TODO: audit for interaction with sparse-index. */
-	ensure_full_index(the_repository->index);
+	/*
+	 * Sparse directory entries have the SKIP_WORKTREE bit set, so they
+	 * will be correctly marked in the result list and skipped by
+	 * add_remove_files(). We don't need to expand the index here.
+	 */
 	for (i = 0; i < the_repository->index->cache_nr; i++) {
 		const struct cache_entry *ce = the_repository->index->cache[i];
 		struct string_list_item *item;
