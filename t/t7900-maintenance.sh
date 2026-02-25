@@ -1128,6 +1128,29 @@ test_expect_success 'unregister from linked worktree removes main worktree entry
 	test_must_fail git config --global --get-all maintenance.repo
 '
 
+test_expect_success 'unregister from linked worktree removes old-style registration' '
+	test_when_finished "git worktree remove --force linked4" &&
+	git worktree add linked4 &&
+	# Simulate old-style registration (pre-normalization fix) from linked worktree
+	git config --global --add maintenance.repo "$(pwd)/linked4" &&
+	git -C linked4 maintenance unregister &&
+	test_must_fail git config --global --get-all maintenance.repo
+'
+
+test_expect_success 'unregister from linked worktree removes both new-style and old-style registrations' '
+	test_when_finished "git worktree remove --force linked5" &&
+	git worktree add linked5 &&
+	# New-style registration (registers main worktree path)
+	git -C linked5 maintenance register &&
+	# Old-style entry left over from a previous git version
+	git config --global --add maintenance.repo "$(pwd)/linked5" &&
+	# Both entries must exist before unregistering
+	git config --global --get-all maintenance.repo >actual &&
+	test_line_count = 2 actual &&
+	git -C linked5 maintenance unregister &&
+	test_must_fail git config --global --get-all maintenance.repo
+'
+
 test_expect_success 'start without GIT_TEST_MAINT_SCHEDULER' '
 	test_when_finished "rm -rf systemctl.log script repo" &&
 	mkdir script &&

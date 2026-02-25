@@ -2193,7 +2193,8 @@ static int maintenance_unregister(int argc, const char **argv, const char *prefi
 	};
 	const char *key = "maintenance.repo";
 	char *maintpath = get_maintpath();
-	int found = 0;
+	char *worktreepath;
+	int found_new = 0, found_legacy = 0;
 	struct string_list_item *item;
 	const struct string_list *list;
 	struct config_set cs = { { 0 } };
@@ -2204,6 +2205,19 @@ static int maintenance_unregister(int argc, const char **argv, const char *prefi
 		usage_with_options(builtin_maintenance_unregister_usage,
 				   options);
 
+	/*
+	 * Also search for the pre-normalization path that older versions of
+	 * git would have registered when run from a linked worktree.  This
+	 * allows unregister to clean up such entries even after upgrading.
+	 */
+	{
+		struct strbuf sb = STRBUF_INIT;
+		const char *p = the_repository->worktree ?
+			the_repository->worktree : the_repository->gitdir;
+		strbuf_realpath(&sb, p, 1);
+		worktreepath = strbuf_detach(&sb, NULL);
+	}
+
 	if (config_file) {
 		git_configset_init(&cs);
 		git_configset_add_file(&cs, config_file);
@@ -2212,14 +2226,15 @@ static int maintenance_unregister(int argc, const char **argv, const char *prefi
 	      ? git_configset_get_string_multi(&cs, key, &list)
 	      : repo_config_get_string_multi(the_repository, key, &list))) {
 		for_each_string_list_item(item, list) {
-			if (!strcmp(maintpath, item->string)) {
-				found = 1;
-				break;
-			}
+			if (!strcmp(maintpath, item->string))
+				found_new = 1;
+			if (strcmp(worktreepath, maintpath) &&
+			    !strcmp(worktreepath, item->string))
+				found_legacy = 1;
 		}
 	}
 
-	if (found) {
+	if (found_new || found_legacy) {
 		int rc;
 		char *global_config_file = NULL;
 
@@ -2229,20 +2244,29 @@ static int maintenance_unregister(int argc, const char **argv, const char *prefi
 		}
 		if (!config_file)
 			die(_("$HOME not set"));
-		rc = repo_config_set_multivar_in_file_gently(the_repository,
-			config_file, key, NULL, maintpath, NULL,
-			CONFIG_FLAGS_MULTI_REPLACE | CONFIG_FLAGS_FIXED_VALUE);
+		if (found_new) {
+			rc = repo_config_set_multivar_in_file_gently(the_repository,
+				config_file, key, NULL, maintpath, NULL,
+				CONFIG_FLAGS_MULTI_REPLACE | CONFIG_FLAGS_FIXED_VALUE);
+			if (rc && (!force || rc == CONFIG_NOTHING_SET))
+				die(_("unable to unset '%s' value of '%s'"),
+				    key, maintpath);
+		}
+		if (found_legacy) {
+			rc = repo_config_set_multivar_in_file_gently(the_repository,
+				config_file, key, NULL, worktreepath, NULL,
+				CONFIG_FLAGS_MULTI_REPLACE | CONFIG_FLAGS_FIXED_VALUE);
+			if (rc && (!force || rc == CONFIG_NOTHING_SET))
+				die(_("unable to unset '%s' value of '%s'"),
+				    key, worktreepath);
+		}
 		free(global_config_file);
-
-		if (rc &&
-		    (!force || rc == CONFIG_NOTHING_SET))
-			die(_("unable to unset '%s' value of '%s'"),
-			    key, maintpath);
 	} else if (!force) {
 		die(_("repository '%s' is not registered"), maintpath);
 	}
 
 	git_configset_clear(&cs);
+	free(worktreepath);
 	free(maintpath);
 	return 0;
 }
