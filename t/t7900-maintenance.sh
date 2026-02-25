@@ -1099,6 +1099,35 @@ test_expect_success !MINGW 'register and unregister with regex metacharacters' '
 		maintenance.repo "$(pwd)/$META"
 '
 
+test_expect_success 'register from linked worktree uses main worktree path' '
+	test_when_finished "git worktree remove --force linked &&
+		git config --global --unset-all maintenance.repo" &&
+	git worktree add linked &&
+	git -C linked maintenance register &&
+	git config --global --get-all maintenance.repo >actual &&
+	echo "$(pwd)" >expect &&
+	test_cmp expect actual
+'
+
+test_expect_success 'register from linked worktree deduplicates' '
+	test_when_finished "git worktree remove --force linked2 &&
+		git config --global --unset-all maintenance.repo" &&
+	git worktree add linked2 &&
+	git maintenance register &&
+	git -C linked2 maintenance register &&
+	git config --global --get-all maintenance.repo >actual &&
+	echo "$(pwd)" >expect &&
+	test_cmp expect actual
+'
+
+test_expect_success 'unregister from linked worktree removes main worktree entry' '
+	test_when_finished "git worktree remove --force linked3" &&
+	git worktree add linked3 &&
+	git maintenance register &&
+	git -C linked3 maintenance unregister &&
+	test_must_fail git config --global --get-all maintenance.repo
+'
+
 test_expect_success 'start without GIT_TEST_MAINT_SCHEDULER' '
 	test_when_finished "rm -rf systemctl.log script repo" &&
 	mkdir script &&

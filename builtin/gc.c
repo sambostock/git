@@ -2093,11 +2093,19 @@ static int maintenance_run(int argc, const char **argv, const char *prefix,
 
 static char *get_maintpath(void)
 {
+	struct worktree **worktrees;
 	struct strbuf sb = STRBUF_INIT;
-	const char *p = the_repository->worktree ?
-		the_repository->worktree : the_repository->gitdir;
 
-	strbuf_realpath(&sb, p, 1);
+	/*
+	 * Normalize to the main worktree's path, even when called from a
+	 * linked worktree. Object database maintenance is shared across all
+	 * worktrees of a repository, so we must always register the main
+	 * worktree to avoid recording linked worktree paths that would
+	 * result in duplicate registrations for the same repository.
+	 */
+	worktrees = get_worktrees_without_reading_head();
+	strbuf_realpath(&sb, worktrees[0]->path, 1);
+	free_worktrees(worktrees);
 	return strbuf_detach(&sb, NULL);
 }
 
